@@ -1,0 +1,8 @@
+# Только для разработки: открывает порт сервиса на локальную машину.
+# На контуре этого файла нет: сервис доступен только gateway по имени `user`
+# в сети `smai`.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  user:
+    ports:
+      - "127.0.0.1:${USER_HTTP_PORT:-8003}:8000"
