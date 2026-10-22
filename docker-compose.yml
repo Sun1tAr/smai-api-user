@@ -1,0 +1,60 @@
+services:
+  # Имя сервиса user совпадает с именем пакета и образа.
+  user:
+    build:
+      context: .
+      target: production
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:?Set DB_NAME}
+      DB_USER: ${DB_USER:?Set DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      DB_TIMEOUT_SECONDS: ${DB_TIMEOUT_SECONDS:-}
+      MIGRATION_LOCK_TIMEOUT_SECONDS: ${MIGRATION_LOCK_TIMEOUT_SECONDS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HASH_CONCURRENCY: ${HASH_CONCURRENCY:-}
+      HASH_QUEUE_MAX: ${HASH_QUEUE_MAX:-}
+      HASH_QUEUE_TIMEOUT_SECONDS: ${HASH_QUEUE_TIMEOUT_SECONDS:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      default:
+      # Общая сеть контура: gateway находит сервис по имени user.
+      smai:
+        aliases:
+          - user
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Временный сервер initdb слушает только Unix socket, ещё не TCP.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  postgres_data:
+
+# Один раз: docker network create smai
+networks:
+  smai:
+    external: true
