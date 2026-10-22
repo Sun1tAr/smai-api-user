@@ -104,3 +104,19 @@ async def test_users_table_matches_the_agreed_schema(app) -> None:
     assert all(column.is_nullable == "NO" for column in columns.values())
     # Только PK и UNIQUE(login): ни внешних ключей, ни лишних CHECK.
     assert constraints == {"pk_users": "p", "uq_users_login": "u"}
+
+
+async def test_profile_on_postgresql(client) -> None:
+    await client.post("/register", json=credentials(" User@Example.com"))
+    response = await client.get("/profile", headers={"X-User-Id": "1"})
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["userId"], body["login"]) == (1, "user@example.com")
+    # Время из БД: UTC, секунды, суффикс Z.
+    assert body["createdAt"].endswith("Z") and "." not in body["createdAt"]
+    assert set(body) == {"userId", "login", "createdAt"}
+    missing = await client.get("/profile", headers={"X-User-Id": "99"})
+    assert (missing.status_code, missing.json()["error"]["code"]) == (
+        404,
+        "USER_NOT_FOUND",
+    )

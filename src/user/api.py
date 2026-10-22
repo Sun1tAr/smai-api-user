@@ -1,14 +1,20 @@
+import re
 from math import ceil
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 
 from user.errors import ErrorResponse, error_response
 from user.hashing import HashingBusy
-from user.repository import LoginAlreadyExists, create_user, find_credentials
-from user.schemas import LoginRequest, RegisterRequest, UserIdResponse
+from user.repository import (
+    LoginAlreadyExists,
+    create_user,
+    find_credentials,
+    find_profile,
+)
+from user.schemas import LoginRequest, ProfileResponse, RegisterRequest, UserIdResponse
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -163,3 +169,76 @@ async def login(body: LoginRequest, request: Request) -> Any:
     if credentials is None or not matches:
         return error_response(401, "INVALID_CREDENTIALS", "Invalid login or password")
     return JSONResponse({"userId": credentials.id})
+
+
+# Колонка id — integer: больший идентификатор не существует и дал бы ошибку драйвера.
+_USER_ID = re.compile(r"[1-9][0-9]{0,9}")
+_MAX_USER_ID = 2**31 - 1
+
+
+def requested_user_id(request: Request) -> int | None:
+    values = request.headers.getlist("x-user-id")
+    if len(values) != 1 or not _USER_ID.fullmatch(values[0]):
+        return None
+    user_id = int(values[0])
+    return user_id if user_id <= _MAX_USER_ID else None
+
+
+@router.get(
+    "/profile",
+    tags=["profile"],
+    summary="Профиль пользователя (API-11)",
+    description=(
+        "Возвращает профиль пользователя, чей идентификатор передан в заголовке "
+        "`X-User-Id`. Заголовок выставляет gateway из проверенного JWT; сервис "
+        "ему доверяет и сам токен не проверяет, потому что доступен только из "
+        "внутренней сети контура (`smai`). Вызывать напрямую снаружи нельзя."
+    ),
+    response_model=ProfileResponse,
+    response_model_by_alias=True,
+    responses={
+        401: {
+            "model": ErrorResponse,
+            "description": (
+                "Заголовок `X-User-Id` отсутствует, повторён или не является "
+                "целым числом больше нуля."
+            ),
+            "content": error_example("UNAUTHORIZED", "User is not identified"),
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": (
+                "Пользователя с таким идентификатором нет (например, удалён после "
+                "выдачи токена). Клиенту gateway отвечает на это 401."
+            ),
+            "content": error_example("USER_NOT_FOUND", "User not found"),
+        },
+        500: COMMON_RESPONSES[500],
+    },
+)
+async def profile(
+    request: Request,
+    x_user_id: Annotated[
+        str | None,
+        Header(
+            alias="X-User-Id",
+            description=(
+                "Идентификатор пользователя из токена; выставляет gateway. "
+                "Целое число от 1 до 2147483647."
+            ),
+            examples=["42"],
+        ),
+    ] = None,
+) -> Any:
+    user_id = requested_user_id(request)
+    if user_id is None:
+        return error_response(401, "UNAUTHORIZED", "User is not identified")
+    try:
+        found = await find_profile(request.app.state.session_factory, user_id)
+    except Exception:
+        return failure_response("profile_failed")
+    if found is None:
+        return error_response(404, "USER_NOT_FOUND", "User not found")
+    return ProfileResponse(
+        user_id=found.id, login=found.login, created_at=found.created_at
+    )

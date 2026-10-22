@@ -1,4 +1,5 @@
 import unicodedata
+from datetime import UTC, datetime
 from functools import cache
 from importlib.resources import files
 from typing import Annotated
@@ -11,6 +12,7 @@ from pydantic import (
     Field,
     StrictStr,
     ValidationInfo,
+    field_serializer,
     field_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -107,3 +109,34 @@ class UserIdResponse(BaseModel):
         ),
         examples=[42],
     )
+
+
+class ProfileResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "userId": 42,
+                "login": "user@example.com",
+                "createdAt": "2026-10-14T12:00:00Z",
+            }
+        },
+    )
+
+    user_id: int = Field(
+        alias="userId", description="Идентификатор пользователя.", examples=[42]
+    )
+    login: str = Field(
+        description="Логин (email) в нижнем регистре, как он сохранён при регистрации.",
+        examples=["user@example.com"],
+    )
+    created_at: datetime = Field(
+        alias="createdAt",
+        description="Время регистрации в UTC, ISO 8601 с `Z`, с точностью до секунды.",
+        examples=["2026-10-14T12:00:00Z"],
+    )
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        utc = value.astimezone(UTC).replace(microsecond=0)
+        return utc.isoformat().replace("+00:00", "Z")
