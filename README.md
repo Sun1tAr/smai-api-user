@@ -1,7 +1,8 @@
 # smai-api-user
 
-MS-3 — сервис пользователей SmartMeal (SMAI-100). Регистрирует пользователей и
-проверяет логин и пароль. Возвращает только `userId`: JWT подписывает gateway
+MS-3 — сервис пользователей SmartMeal (SMAI-100, SMAI-101). Регистрирует
+пользователей, проверяет логин и пароль и отдаёт профиль. Возвращает только
+`userId`: JWT подписывает gateway
 (приватный ключ хранится только в нём), поэтому в ответах сервиса нет `token`.
 Это отклонение от текста контрактов API-8/API-9, где `token` указан и для сервиса;
 клиент получает `{userId, token}` от gateway (`POST /auth/register`,
@@ -18,9 +19,15 @@ gateway обращается к нему по имени `user` в сети `sma
 | --- | --- | --- | --- |
 | `POST /register` | Создаёт пользователя `{login, password}`, возвращает `{"userId": N}` | 201, 400 `VALIDATION_ERROR`, 409 `LOGIN_ALREADY_EXISTS`, 500 `INTERNAL_ERROR`, 503 `SERVICE_BUSY` | API-8 |
 | `POST /login` | Проверяет `{login, password}`, возвращает `{"userId": N}` | 200, 400 `VALIDATION_ERROR`, 401 `INVALID_CREDENTIALS`, 500 `INTERNAL_ERROR`, 503 `SERVICE_BUSY` | API-9 |
+| `GET /profile` | Профиль по заголовку `X-User-Id` (его ставит gateway из JWT): `{"userId", "login", "createdAt"}`, `createdAt` в UTC, ISO 8601 с `Z` | 200, 401 `UNAUTHORIZED` (нет, повтор или не целое > 0), 404 `USER_NOT_FOUND`, 500 `INTERNAL_ERROR` | API-11 |
 | `GET /health` | Готовность: `SELECT 1` к PostgreSQL; успешный ответ логируется на DEBUG, 503 — на INFO | 200 `{"status":"ok"}`, 503 `INTERNAL_ERROR` | служебный |
 | `GET /metrics` | Метрики Prometheus (вне схемы OpenAPI); успешный ответ на DEBUG | 200 `text/plain` | служебный |
 | `GET /docs`, `GET /openapi.json` | Swagger UI и схема OpenAPI | 200 | служебный |
+
+`GET /profile` не проверяет токен: сервис доверяет `X-User-Id`, потому что
+доступен только из сети `smai`, а клиентский заголовок gateway срезает. На
+`404 USER_NOT_FOUND` (токен выдан удалённому пользователю) gateway отвечает
+клиенту 401.
 
 Пример:
 
@@ -60,6 +67,8 @@ curl -s -X POST http://127.0.0.1:8003/login -H 'Content-Type: application/json' 
 значения и пароль не возвращаются), `INVALID_CREDENTIALS` (401; неизвестный логин и
 неверный пароль неразличимы по ответу и по времени — для неизвестного логина
 проверяется фиктивный хэш тех же параметров), `LOGIN_ALREADY_EXISTS` (409),
+`UNAUTHORIZED` (401, `/profile` без корректного `X-User-Id`),
+`USER_NOT_FOUND` (404, `/profile`),
 `SERVICE_BUSY` (503 с `Retry-After`), `INTERNAL_ERROR` (500; также 503 на
 `/health`), `NOT_FOUND` (404), `METHOD_NOT_ALLOWED` (405). Каждый ответ содержит
 `X-Request-ID` (входящее значение принимается, если это до 128 символов

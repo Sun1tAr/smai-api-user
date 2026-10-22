@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,13 @@ class LoginAlreadyExists(Exception):
 class Credentials:
     id: int
     password_hash: str
+
+
+@dataclass(frozen=True)
+class Profile:
+    id: int
+    login: str
+    created_at: datetime
 
 
 # Дубликат определяем по SQLSTATE и имени ограничения логина, а не по тексту ошибки.
@@ -53,3 +61,15 @@ async def find_credentials(
             )
         ).one_or_none()
     return None if row is None else Credentials(row.id, row.password_hash)
+
+
+async def find_profile(
+    session_factory: async_sessionmaker[AsyncSession], user_id: int
+) -> Profile | None:
+    async with session_factory() as session:
+        row = (
+            await session.execute(
+                select(User.id, User.login, User.created_at).where(User.id == user_id)
+            )
+        ).one_or_none()
+    return None if row is None else Profile(row.id, row.login, row.created_at)
