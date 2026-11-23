@@ -1,0 +1,41 @@
+services:
+  tests:
+    build:
+      context: .
+      target: test
+    environment:
+      TEST_DB_HOST: postgres-test
+      TEST_DB_PORT: "5432"
+      TEST_DB_NAME: user_test
+      TEST_DB_USER: user_test
+      TEST_DB_PASSWORD: user-test-only
+      # Любой пропущенный тест = ошибка (интеграционные не должны молча отключаться).
+      FAIL_ON_SKIP: "1"
+      COVERAGE_FILE: /tmp/.coverage
+    command:
+      [
+        "pytest",
+        "-p",
+        "no:cacheprovider",
+        "-q",
+        "--cov=user",
+        "--cov-report=term-missing",
+        "--cov-fail-under=98",
+      ]
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+  postgres-test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: user_test
+      POSTGRES_USER: user_test
+      POSTGRES_PASSWORD: user-test-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 20
